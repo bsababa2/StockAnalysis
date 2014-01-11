@@ -2,34 +2,41 @@ package screens;
 
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
+import org.jfree.chart.axis.DateAxis;
+import org.jfree.chart.axis.DateTickUnit;
+import org.jfree.chart.axis.DateTickUnitType;
 import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.renderer.xy.StandardXYItemRenderer;
-import org.jfree.data.xy.XYSeries;
-import org.jfree.data.xy.XYSeriesCollection;
-import org.jfree.ui.RefineryUtilities;
+import org.jfree.data.time.TimeSeries;
+import org.jfree.data.time.TimeSeriesCollection;
 import utils.Utils;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.Random;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-public class ClustersScreen extends JFrame
+public class ClustersScreen extends JDialog
 {
-	public ClustersScreen() throws CloneNotSupportedException
+	private static Dimension STOCK_NAME_LABEL = new Dimension(40, 25);
+
+	private Map<String, TimeSeries> stockToData = new HashMap<String, TimeSeries>();
+
+	public ClustersScreen(JFrame owner, Map<String, TimeSeries> stockToData) throws CloneNotSupportedException, IOException
 	{
+		super(owner, true);
+		this.stockToData = stockToData;
 		this.setTitle("Analysis Results");
-		Utils.setSoftSize(this, new Dimension(700, 400));
+		Utils.setSoftSize(this, new Dimension(700, 600));
 		this.setLocationRelativeTo(null);
 
-		JPanel clustersPanel = new JPanel();
-		Utils.setLineLayout(clustersPanel);
-		Utils.addSmallRigid(clustersPanel);
-		for (int i = 0; i < 3; i++)
-		{
-			clustersPanel.add(getClusterPanelByIndex(i));
-			Utils.addStandardRigid(clustersPanel);
-		}
+		JPanel clustersPanel = createClusterPanel();
 
 		JLabel mainLabel = new JLabel("Analysis Results");
 		mainLabel.setFont(new Font("Arial", Font.BOLD, 24));
@@ -46,9 +53,27 @@ public class ClustersScreen extends JFrame
 		setContentPane(mainPanel);
 	}
 
-	private JPanel getClusterPanelByIndex(int index) throws CloneNotSupportedException
+	private JPanel createClusterPanel() throws IOException, CloneNotSupportedException
 	{
-		NumberAxis domainAxis = new NumberAxis();
+		JPanel clustersPanel = new JPanel();
+		Utils.setLineLayout(clustersPanel);
+		Utils.addSmallRigid(clustersPanel);
+
+		Map<Character, List<String>> clusterToStocks  = getClusterMapFromFile();
+
+		for (Character cluster : clusterToStocks.keySet())
+		{
+			clustersPanel.add(createClusterPanel(cluster, clusterToStocks.get(cluster)));
+			Utils.addStandardRigid(clustersPanel);
+		}
+
+		return clustersPanel;
+	}
+
+	private JPanel createClusterPanel(Character cluster, List<String> stocks) throws CloneNotSupportedException
+	{
+		DateAxis domainAxis = new DateAxis();
+		domainAxis.setTickUnit(new DateTickUnit(DateTickUnitType.DAY, 1));
 		domainAxis.setTickLabelsVisible(false);
 		domainAxis.setTickMarksVisible(false);
 		domainAxis.setAxisLineVisible(false);
@@ -73,7 +98,7 @@ public class ClustersScreen extends JFrame
 		plot.setRangeAxis(rangeAxis);
 		plot.setRenderer(new StandardXYItemRenderer(StandardXYItemRenderer.LINES));
 
-		JLabel clusterLabel = new JLabel("Cluster" + " " + index);
+		JLabel clusterLabel = new JLabel("Cluster" + " " + cluster);
 		clusterLabel.setFont(new Font("Arial", Font.BOLD, 16));
 		JPanel labelPanel = new JPanel();
 		labelPanel.add(clusterLabel);
@@ -82,13 +107,23 @@ public class ClustersScreen extends JFrame
 		Utils.setPageLayout(clusterPanel);
 		Utils.addSmallRigid(clusterPanel);
 		clusterPanel.add(labelPanel);
-		for (int i = 0; i < 10; i++)
+		for (String stock : stocks)
 		{
-			plot.setDataset(getDataByStock());
+			JPanel stockPanel = new JPanel();
+			Utils.setLineLayout(stockPanel);
+
+			plot.setDataset(new TimeSeriesCollection(stockToData.get(stock)));
 			JFreeChart chart = new JFreeChart(null, JFreeChart.DEFAULT_TITLE_FONT, plot, false);
 			ChartPanel chartPanel = new ChartPanel(chart);
+
+			JLabel stockNameLabel = new JLabel(stock);
+			Utils.setHardSize(stockNameLabel, STOCK_NAME_LABEL);
+			stockPanel.add(stockNameLabel);
+			Utils.addSmallRigid(stockPanel);
+			stockPanel.add(chartPanel);
+
 			Utils.addStandardRigid(clusterPanel);
-			clusterPanel.add(chartPanel);
+			clusterPanel.add(stockPanel);
 
 			plot = (XYPlot) plot.clone();
 		}
@@ -96,28 +131,25 @@ public class ClustersScreen extends JFrame
 		return clusterPanel;
 	}
 
-	private XYSeriesCollection getDataByStock()
+	private Map<Character, List<String>> getClusterMapFromFile() throws IOException
 	{
-		XYSeries series = new XYSeries("Stock Traffic");
-		Random r = new Random();
-		int x = 0;
-		int y = 0;
-		for(int i = 0; i < 50; i++)
+		Map<Character, List<String>> clusterToStocksMap = new HashMap<Character, List<String>>();
+		BufferedReader reader = new BufferedReader(new FileReader("clusters.txt"));
+
+		String line = reader.readLine();
+		for (int i = 0; line != null && !line.isEmpty(); i++, line = reader.readLine())
 		{
-			x+= r.nextBoolean() ? -r.nextInt(10): r.nextInt(10);
-			y+= r.nextBoolean() ? -r.nextInt(10): r.nextInt(10);
-			series.add(x, y);
+			String valuesListString = line.substring(line.indexOf("[") + 1, line.indexOf("]"));
+			String[] values = valuesListString.split(",");
+
+			char cluster = (char) ('A' + i);
+			clusterToStocksMap.put(cluster, new ArrayList<String>());
+			for (String value : values)
+			{
+				clusterToStocksMap.get(cluster).add(value);
+			}
 		}
 
-		return new XYSeriesCollection(series);
-	}
-
-	public static void main(final String[] args) throws CloneNotSupportedException
-	{
-		ClustersScreen demo = new ClustersScreen();
-		demo.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		demo.pack();
-		RefineryUtilities.centerFrameOnScreen(demo);
-		demo.setVisible(true);
+		return clusterToStocksMap;
 	}
 }

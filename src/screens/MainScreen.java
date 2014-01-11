@@ -2,6 +2,8 @@ package screens;
 
 import com.sun.deploy.panel.NumberDocument;
 import org.apache.commons.io.FileUtils;
+import org.jfree.data.time.Day;
+import org.jfree.data.time.TimeSeries;
 import utils.Utils;
 
 import javax.swing.*;
@@ -12,8 +14,9 @@ import java.io.*;
 import java.net.Proxy;
 import java.net.URL;
 import java.net.URLConnection;
-import java.util.ArrayList;
-import java.util.Calendar;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.*;
 import java.util.List;
 
 /**
@@ -21,18 +24,9 @@ import java.util.List;
  */
 public class MainScreen extends JFrame
 {
-	private static final String STOCKS_LIST = "ftp://ftp.nasdaqtrader.com/symboldirectory/nasdaqlisted.txt";
 	private static String stockChartUrl = "http://ichart.yahoo.com/table.csv?s=STOCK&a=FM&b=FD&c=FY&d=TM&e=TD&f=TY&g=d&ignore=.csv";
+	private static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
-	static
-	{
-		Calendar calendar = Calendar.getInstance();
-		stockChartUrl = stockChartUrl.replace("TM", calendar.get(Calendar.MONTH) + "");
-		stockChartUrl = stockChartUrl.replace("TD", calendar.get(Calendar.DAY_OF_MONTH) + "");
-		stockChartUrl = stockChartUrl.replace("TY", calendar.get(Calendar.YEAR) + "");
-	}
-
-	private JTextField numStockField = new JTextField(new NumberDocument(), "100", 5);
 	private JTextField daysToAnalyzeField = new JTextField(new NumberDocument(), "20", 4);
 	private JTextField numOfClustersField = new JTextField(new NumberDocument(), "3", 3);
 	private JCheckBox openCheckBox = new JCheckBox("Open", true);
@@ -40,6 +34,11 @@ public class MainScreen extends JFrame
 	private JCheckBox lowCheckBox = new JCheckBox("Low", true);
 	private JCheckBox closeCheckBox = new JCheckBox("Close", true);
 	private JButton analyzeButton = new JButton("Analyze");
+
+	private Map<String, TimeSeries> stockToData = new HashMap<String, TimeSeries>();
+	private String tempChartUtl = stockChartUrl;
+
+	private JTextField numStockField = new JTextField(new NumberDocument(), "100", 5);
 
 	public MainScreen() throws HeadlessException
 	{
@@ -51,6 +50,11 @@ public class MainScreen extends JFrame
 		Utils.setHardSize(numStockField, new Dimension(50, 25));
 		Utils.setHardSize(daysToAnalyzeField, new Dimension(50, 25));
 		Utils.setHardSize(numOfClustersField, new Dimension(50, 25));
+
+		Calendar calendar = Calendar.getInstance();
+		stockChartUrl = stockChartUrl.replace("TM", calendar.get(Calendar.MONTH) + "");
+		stockChartUrl = stockChartUrl.replace("TD", calendar.get(Calendar.DAY_OF_MONTH) + "");
+		stockChartUrl = stockChartUrl.replace("TY", calendar.get(Calendar.YEAR) + "");
 
 		JPanel numStockPanel = new JPanel();
 		Utils.setLineLayout(numStockPanel);
@@ -133,15 +137,16 @@ public class MainScreen extends JFrame
 		int daysToAnalyze = Integer.parseInt(daysToAnalyzeField.getText());
 		Calendar calendar = Calendar.getInstance();
 		calendar.add(Calendar.DAY_OF_MONTH, -1 * daysToAnalyze);
-		stockChartUrl = stockChartUrl.replace("FM", calendar.get(Calendar.MONTH) + "");
-		stockChartUrl = stockChartUrl.replace("FD", calendar.get(Calendar.DAY_OF_MONTH) + "");
-		stockChartUrl = stockChartUrl.replace("FY", calendar.get(Calendar.YEAR) + "");
+		tempChartUtl = stockChartUrl.replace("FM", calendar.get(Calendar.MONTH) + "");
+		tempChartUtl = stockChartUrl.replace("FD", calendar.get(Calendar.DAY_OF_MONTH) + "");
+		tempChartUtl = stockChartUrl.replace("FY", calendar.get(Calendar.YEAR) + "");
 
 		try
 		{
 			// Creates the directory in which the stock files will be stored
 			File dir = new File("StockFiles");
 			if (dir.exists()) FileUtils.deleteDirectory(dir);
+			Thread.sleep(1000);
 			dir.mkdir();
 
 			List<String> stocks = getStockList(Integer.parseInt(numStockField.getText()));
@@ -150,9 +155,9 @@ public class MainScreen extends JFrame
 				createFilesForStock(daysToAnalyze, stock);
 			}
 
-			Utils.showInfoMsg(this, "Analysis completed!");
+			new ClustersScreen(this, stockToData).setVisible(true);
 		}
-		catch (IOException e)
+		catch (Exception e)
 		{
 			Utils.showExceptionMsg(this, e);
 			e.printStackTrace();
@@ -175,12 +180,16 @@ public class MainScreen extends JFrame
 		return stocks;
 	}
 
-	private void createFilesForStock(int numOfDays, String stockName) throws IOException
+	private void createFilesForStock(int numOfDays, String stockName) throws IOException, ParseException
 	{
-		String stockUrl = stockChartUrl.replace("STOCK", stockName);
+		// Creates the url
+		String stockUrl = tempChartUtl.replace("STOCK", stockName);
 		URL url = new URL(stockUrl);
 		URLConnection urlConnection = url.openConnection(Proxy.NO_PROXY);
 		BufferedReader br = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
+
+		// Create a new entry for the stock
+		stockToData.put(stockName, new TimeSeries(stockName));
 
 		// Ignoring the table headers
 		String line = br.readLine();
@@ -193,13 +202,19 @@ public class MainScreen extends JFrame
 			line = br.readLine();
 			for (int j = 0; j < 10 && line != null; j++)
 			{
+				// Gets the stock values from the current line and writes them to the generated file
 				String values[] = line.split(",");
-				StringBuilder lineToWrite = new StringBuilder(values[0]);
+				StringBuilder lineToWrite = new StringBuilder(stockName).append(",").append(values[0]);
 				if (openCheckBox.isSelected()) lineToWrite.append(",").append(values[1]);
 				if (highCheckBox.isSelected()) lineToWrite.append(",").append(values[2]);
 				if (lowCheckBox.isSelected()) lineToWrite.append(",").append(values[3]);
 				if (closeCheckBox.isSelected()) lineToWrite.append(",").append(values[4]);
 				writer.println(lineToWrite);
+
+				// Adds the stock values from the current line to the map (Date, Open value)
+				stockToData.get(stockName).add(new Day(dateFormat.parse(values[0])),
+					Double.parseDouble(values[1]));
+
 				line = br.readLine();
 			}
 			writer.close();
